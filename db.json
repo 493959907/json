@@ -1,0 +1,153 @@
+diff --git a/src/assets/css/videoosd.scss b/src/assets/css/videoosd.scss
+index c0ef57dd5..d6bf3e429 100644
+--- a/src/assets/css/videoosd.scss
++++ b/src/assets/css/videoosd.scss
+@@ -375,3 +375,39 @@
+         transform: rotate(-360deg);
+     }
+ }
++
++@media (hover:hover) and (pointer:fine) {
++    .skipIntro .paper-icon-button-light:hover:not(:disabled) {
++        color:black !important;
++        background-color:rgba(47,93,98,0) !important;
++    }
++}
++
++.skipIntro {
++    padding: 0 1px;
++    position: absolute;
++    right: 10em;
++    bottom: 9em;
++    background-color:rgba(25, 25, 25, 0.66);
++    border: 1px solid;
++    border-radius: 0px;
++    display: inline-block;
++    cursor: pointer;
++    box-shadow: inset 0 0 0 0 #f9f9f9;
++    -webkit-transition: ease-out 0.4s;
++    -moz-transition: ease-out 0.4s;
++    transition: ease-out 0.4s;
++}
++
++@media (max-width: 1080px) {
++    .skipIntro {
++        right: 10%;
++    }
++}
++
++.skipIntro:hover {
++    box-shadow: inset 400px 0 0 0 #f9f9f9;
++    -webkit-transition: ease-in 1s;
++    -moz-transition: ease-in 1s;
++    transition: ease-in 1s;
++}
+diff --git a/src/controllers/playback/video/index.html b/src/controllers/playback/video/index.html
+index c76a1714a..e789ea43d 100644
+--- a/src/controllers/playback/video/index.html
++++ b/src/controllers/playback/video/index.html
+@@ -6,6 +6,12 @@
+         </div>
+     </div>
+     <div class="upNextContainer hide"></div>
++    <div class="skipIntro hide">
++        <button is="paper-icon-button-light" class="btnSkipIntro paper-icon-button-light">
++            Skip Intro
++            <span class="material-icons skip_next"></span>
++        </button>
++    </div>
+     <div class="videoOsdBottom videoOsdBottom-maincontrols">
+         <div class="osdControls">
+             <div class="osdTextContainer osdMainTextContainer">
+diff --git a/src/controllers/playback/video/index.js b/src/controllers/playback/video/index.js
+index 40fbd61bb..65ba5ba30 100644
+--- a/src/controllers/playback/video/index.js
++++ b/src/controllers/playback/video/index.js
+@@ -462,9 +462,36 @@ import { appRouter } from '../../../components/appRouter';
+                 updatePlaylist();
+                 enableStopOnBack(true);
+                 updatePlaybackRate(player);
++                getIntroTimestamps(state.NowPlayingItem);
+             }
+         }
+ 
++        function getIntroTimestamps(item) {
++            const apiClient = ServerConnections.getApiClient(item);
++            const address = apiClient.serverAddress();
++
++            const url = `${address}/Episode/${item.Id}/IntroTimestamps`;
++            const reqInit = {
++                headers: {
++                    "Authorization": `MediaBrowser Token=${apiClient.accessToken()}`
++                }
++            };
++
++            fetch(url, reqInit).then(r => {
++                if (!r.ok) {
++                    return;
++                }
++
++                return r.json();
++            }).then(intro => {
++                tvIntro = intro;
++            });
++        }
++
++        function skipIntro() {
++            playbackManager.seekMs(tvIntro.IntroEnd * 1000);
++        }
++
+         function onPlayPauseStateChanged() {
+             if (isEnabled) {
+                 updatePlayPauseState(this.paused());
+@@ -582,6 +609,22 @@ import { appRouter } from '../../../components/appRouter';
+                     const item = currentItem;
+                     refreshProgramInfoIfNeeded(player, item);
+                     showComingUpNextIfNeeded(player, item, currentTime, currentRuntimeTicks);
++
++                    // Check if an introduction sequence was detected for this item.
++                    if (!tvIntro?.Valid) {
++                        return;
++                    }
++
++                    const seconds = playbackManager.currentTime(player) / 1000;
++                    const skipIntro = document.querySelector(".skipIntro");
++
++                    // If the skip prompt should be shown, show it.
++                    if (seconds >= tvIntro.ShowSkipPromptAt && seconds < tvIntro.HideSkipPromptAt) {
++                        skipIntro.classList.remove("hide");
++                        return;
++                    }
++
++                    skipIntro.classList.add("hide");
+                 }
+             }
+         }
+@@ -1318,6 +1361,7 @@ import { appRouter } from '../../../components/appRouter';
+         let programEndDateMs = 0;
+         let playbackStartTimeTicks = 0;
+         let subtitleSyncOverlay;
++        let tvIntro;
+         const nowPlayingVolumeSlider = view.querySelector('.osdVolumeSlider');
+         const nowPlayingVolumeSliderContainer = view.querySelector('.osdVolumeSliderContainer');
+         const nowPlayingPositionSlider = view.querySelector('.osdPositionSlider');
+@@ -1467,6 +1511,11 @@ import { appRouter } from '../../../components/appRouter';
+         let lastPointerDown = 0;
+         /* eslint-disable-next-line compat/compat */
+         dom.addEventListener(view, window.PointerEvent ? 'pointerdown' : 'click', function (e) {
++            // If the user clicked the skip intro button, don't pause the video. Fixes ConfusedPolarBear/intro-skipper#44.
++            if (dom.parentWithClass(e.target, ['btnSkipIntro'])) {
++                return;
++            }
++
+             if (dom.parentWithClass(e.target, ['videoOsdBottom', 'upNextContainer'])) {
+                 return void showOsd();
+             }
+@@ -1594,6 +1643,7 @@ import { appRouter } from '../../../components/appRouter';
+         });
+         view.querySelector('.btnAudio').addEventListener('click', showAudioTrackSelection);
+         view.querySelector('.btnSubtitles').addEventListener('click', showSubtitleTrackSelection);
++        view.querySelector('.btnSkipIntro').addEventListener('click', skipIntro);
+ 
+         // Register to SyncPlay playback events and show big animated icon
+         const showIcon = (action) => {
